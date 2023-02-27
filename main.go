@@ -6,15 +6,15 @@ import (
 
 	_ "github.com/denisenkom/go-mssqldb"
 
-	databaseprocess "learning-golang/utils/database"
+	"learning-golang/cache"
+	"learning-golang/utils/database"
 )
 
 func main() {
-	// create a new DatabaseProcess instance
-	dbp := databaseprocess.New()
+	cache.Initialize()
 
-	// add a SELECT query to the DatabaseProcess instance
-	dbp = dbp.AddQuery("SELECT * FROM kullanicilar WITH (NOLOCK)")
+	// create a new DatabaseProcess instance
+	dbp := databaseprocess.New().AddQuery("SELECT * FROM kullanicilar WITH (NOLOCK) WHERE ad = @ad").AddParameter("ad", "Alperen")
 
 	// execute the query and get the results
 	result, err := dbp.GetDataTable()

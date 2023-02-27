@@ -1,54 +1,40 @@
 package databaseprocess
 
 import (
+	"context"
 	"database/sql"
-	"strconv"
-)
+	"fmt"
+	"learning-golang/cache"
+	"time"
 
-const connectionString = "server=localhost;user id=sa;password=1234;database=test"
+	_ "github.com/denisenkom/go-mssqldb"
+)
 
 type DatabaseProcess struct {
 	query      string
 	parameters map[string]interface{}
-	namedArgs  []sql.NamedArg
 }
 
 func New() *DatabaseProcess {
 	return &DatabaseProcess{
 		query:      "",
 		parameters: make(map[string]interface{}),
-		namedArgs:  make([]sql.NamedArg, 0),
 	}
 }
 
 func (dbp *DatabaseProcess) AddQuery(query string) *DatabaseProcess {
-	if dbp.parameters == nil {
-		dbp.parameters = make(map[string]interface{})
-	}
-	return &DatabaseProcess{
-		query:      query,
-		parameters: dbp.parameters,
-	}
+	dbp.query = query
+	return dbp
 }
 
 func (dbp *DatabaseProcess) AddParameter(key string, value interface{}) *DatabaseProcess {
-	if dbp.parameters == nil {
-		dbp.parameters = make(map[string]interface{})
-	}
 	dbp.parameters[key] = value
-	namedArgs := make([]sql.NamedArg, 0, len(dbp.parameters))
-	for k, v := range dbp.parameters {
-		namedArgs = append(namedArgs, sql.Named(k, v))
-	}
-	return &DatabaseProcess{
-		query:      dbp.query,
-		parameters: dbp.parameters,
-		namedArgs:  namedArgs,
-	}
+	return dbp
 }
 
-func (dbp *DatabaseProcess) GetDataTable() (map[string]interface{}, error) {
-	db, err := sql.Open("sqlserver", connectionString)
+func (dbp *DatabaseProcess) GetDataTable() ([]map[string]interface{}, error) {
+	fmt.Println("connstr", cache.DatabaseConfig.ConnectionString)
+	db, err := sql.Open("sqlserver", cache.DatabaseConfig.ConnectionString)
 	if err != nil {
 		return nil, err
 	}
@@ -61,35 +47,34 @@ func (dbp *DatabaseProcess) GetDataTable() (map[string]interface{}, error) {
 	}
 	defer tx.Rollback()
 
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cache.DatabaseConfig.TimeoutAsSeconds)*time.Second)
+	defer cancel()
+
 	// Prepare the query with named parameters
-	namedArgs := make([]sql.NamedArg, len(dbp.parameters))
-	i := 0
-	for k, v := range dbp.parameters {
-		namedArgs[i] = sql.Named(k, v)
-		i++
+	namedParams := make([]interface{}, 0, len(dbp.parameters))
+
+	if len(dbp.parameters) > 0 {
+		for key, value := range dbp.parameters {
+			namedParams = append(namedParams, sql.Named(key, value))
+		}
 	}
+
 	// Prepare the query with placeholders for the parameters
-	stmt, err := tx.Prepare(dbp.query)
+	stmt, err := tx.PrepareContext(ctx, dbp.query)
 	if err != nil {
 		return nil, err
 	}
 	defer stmt.Close()
 
-	// Convert named arguments to interface slice
-	var args []interface{}
-	for _, arg := range namedArgs {
-		args = append(args, arg.Value)
-	}
-
 	// Execute the query with the parameters
-	rows, err := stmt.Query(args...)
+	rows, err := stmt.QueryContext(ctx, namedParams...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	// Build the result map
-	result := make(map[string]interface{})
+	// Build the result list
+	var result []map[string]interface{}
 	columns, err := rows.Columns()
 	if err != nil {
 		return nil, err
@@ -113,7 +98,7 @@ func (dbp *DatabaseProcess) GetDataTable() (map[string]interface{}, error) {
 				rowMap[col] = val
 			}
 		}
-		result[strconv.FormatInt(rowMap["id"].(int64), 10)] = rowMap
+		result = append(result, rowMap)
 	}
 	err = rows.Err()
 	if err != nil {

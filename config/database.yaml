@@ -1,0 +1,2 @@
+connection_string: "server=localhost;user id=sa;password=Asdfqwer1!;database=test"
+timeout_as_seconds: 60
